@@ -21,21 +21,22 @@ struct SniffConfig {
   bool captureProbe = false;
 };
 
+// O que um beacon ou association request anuncia sobre PMF (802.11w). Se o
+// alvo exige/suporta PMF, um deauth nao assinado e ignorado pelo cliente
+// mesmo que o ESP mande o frame com sucesso (esp_wifi_80211_tx -> ESP_OK).
+struct PmfInfo {
+  bool known = false;     // conseguimos ler o RSN IE desse frame
+  bool capable = false;   // MFPC: suporta PMF (pode ou nao aceitar)
+  bool required = false;  // MFPR: exige PMF -- deauth nao assinado NUNCA vai funcionar
+};
+
 // Um evento guardado no buffer circular.
 struct SniffEntry {
   String type;        // "assoc_req" | "reassoc_req" | "probe_req"
   String mac;          // MAC de origem do frame (addr2)
   String ssid;          // so em probe_req direcionado; "" se nao se aplica/coringa
   bool targetMatch;     // assoc/reassoc: BSSID == alvo travado. probe: SSID pedido == SSID do alvo.
-};
-
-// O que o beacon do alvo travado anuncia sobre PMF (802.11w). Se o alvo
-// exige/suporta PMF, um deauth nao assinado e ignorado pelo cliente mesmo
-// que o ESP mande o frame com sucesso (esp_wifi_80211_tx -> ESP_OK).
-struct PmfInfo {
-  bool known = false;     // ja vimos um beacon do alvo e conseguimos ler o RSN IE
-  bool capable = false;   // MFPC: suporta PMF (pode ou nao aceitar)
-  bool required = false;  // MFPR: exige PMF -- deauth nao assinado NUNCA vai funcionar
+  PmfInfo pmf;           // so em assoc/reassoc: PMF que ESSE dispositivo pediu pra sessao dele
 };
 
 // Modo promiscuo: escuta o canal ja travado pelo WifiManager e guarda os eventos

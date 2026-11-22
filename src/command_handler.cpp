@@ -242,6 +242,7 @@ String CommandHandler::doSniffPoll() {
     o["mac"] = e.mac;
     if (e.ssid.length() > 0) o["ssid"] = e.ssid;
     o["target_match"] = e.targetMatch;
+    if (e.pmf.known) writePmf(o, e.pmf);  // pmf que ESSE device pediu (so assoc/reassoc)
   }
 
   String out;

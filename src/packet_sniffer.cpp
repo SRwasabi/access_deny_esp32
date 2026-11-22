@@ -29,18 +29,18 @@ static String parseSsidIe(const uint8_t *frame, int len) {
   return String(buf);
 }
 
-// Le o RSN IE (tag 48) de um beacon pra saber se o alvo exige/suporta PMF.
-// Corpo do beacon comeca em offset 24 (header) + 12 (timestamp/interval/capab).
-static void parseBeaconPmf(const uint8_t *frame, int len, PmfInfo &out) {
-  int offset = 24 + 12;
-  while (offset + 2 <= len) {
-    uint8_t tag = frame[offset];
-    uint8_t tagLen = frame[offset + 1];
+// Le o RSN IE (tag 48) de uma regiao de Information Elements e extrai os bits
+// de PMF. "ies" aponta pro primeiro byte depois dos campos fixos do frame.
+static void parseRsnPmfFromIEs(const uint8_t *ies, int iesLen, PmfInfo &out) {
+  int offset = 0;
+  while (offset + 2 <= iesLen) {
+    uint8_t tag = ies[offset];
+    uint8_t tagLen = ies[offset + 1];
     int dataStart = offset + 2;
-    if (dataStart + tagLen > len) return;  // IE cortado, desiste
+    if (dataStart + tagLen > iesLen) return;  // IE cortado, desiste
 
     if (tag == 48) {  // RSN Information Element
-      const uint8_t *d = frame + dataStart;
+      const uint8_t *d = ies + dataStart;
       int p = 2;  // pula "version" (2 bytes)
       if (p + 4 > tagLen) return;
       p += 4;  // group cipher suite
@@ -50,7 +50,7 @@ static void parseBeaconPmf(const uint8_t *frame, int len, PmfInfo &out) {
       if (p + 2 > tagLen) return;
       uint16_t acount = d[p] | (d[p + 1] << 8);
       p += 2 + 4 * acount;  // lista de AKM suites
-      if (p + 2 > tagLen) return;  // sem campo de RSN Capabilities nesse beacon
+      if (p + 2 > tagLen) return;  // sem campo de RSN Capabilities nesse frame
       uint16_t caps = d[p] | (d[p + 1] << 8);
       out.known = true;
       out.capable = (caps & 0x0080) != 0;   // bit7 = MFPC
@@ -59,6 +59,17 @@ static void parseBeaconPmf(const uint8_t *frame, int len, PmfInfo &out) {
     }
     offset = dataStart + tagLen;
   }
+}
+
+// frame = frame inteiro (byte 0 = frame control). fixedFieldsLen = quantos
+// bytes de campos fixos vem entre o cabecalho de 24 bytes e os IEs:
+//   beacon            -> 12 (timestamp 8 + beacon interval 2 + capability 2)
+//   association req   -> 4  (capability 2 + listen interval 2)
+//   reassociation req -> 10 (capability 2 + listen interval 2 + current AP 6)
+static void parseFramePmf(const uint8_t *frame, int len, int fixedFieldsLen, PmfInfo &out) {
+  int iesStart = 24 + fixedFieldsLen;
+  if (iesStart > len) return;
+  parseRsnPmfFromIEs(frame + iesStart, len - iesStart, out);
 }
 
 void PacketSniffer::begin(const uint8_t bssid[6], const String &ssid, const SniffConfig &cfg) {
@@ -106,7 +117,7 @@ void PacketSniffer::handlePacket(const wifi_promiscuous_pkt_t *pkt) {
   if (subtype == 0x08) {  // beacon
     stats_.beaconSeen++;
     if (!pmf_.known && memcmp(addr3, targetBssid_, 6) == 0) {
-      parseBeaconPmf(p, len, pmf_);
+      parseFramePmf(p, len, 12, pmf_);
     }
     return;
   }
@@ -131,5 +142,13 @@ void PacketSniffer::handlePacket(const wifi_promiscuous_pkt_t *pkt) {
   bool wantIt = isReassoc ? cfg_.captureReassoc : cfg_.captureAssoc;
   if (!wantIt) return;
 
-  push(SniffEntry{isReassoc ? "reassoc_req" : "assoc_req", macToString(addr2), "", bssidMatch});
+  // PMF que ESSE dispositivo pediu pra essa sessao -- diferente do PMF que o
+  // AP anuncia no beacon. O AP pode deixar "opcional" e o cliente, por conta
+  // propria (comum em Windows/Intel), escolher usar mesmo assim.
+  PmfInfo entryPmf;
+  parseFramePmf(p, len, isReassoc ? 10 : 4, entryPmf);
+
+  SniffEntry entry{isReassoc ? "reassoc_req" : "assoc_req", macToString(addr2), "", bssidMatch};
+  entry.pmf = entryPmf;
+  push(entry);
 }
