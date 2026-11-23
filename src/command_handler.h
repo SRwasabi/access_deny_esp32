@@ -22,8 +22,10 @@
 //   -- "pmf" (em sniff_poll/sniff_stats/deauth): lido do RSN IE do beacon do
 //      alvo. Se "required":true, deauth nao assinado nunca vai desconectar
 //      ninguem -- nao e bug nosso, e protecao real do 802.11w.
-//   {"cmd":"deauth","target":"broadcast","reason":1}                (type default: "deauth")
+//   {"cmd":"deauth","target":"broadcast","reason":1}                (one-shot; type default: "deauth", count default: 1, max 100)
 //   {"cmd":"deauth","target":"AA:BB:CC:DD:EE:FF","reason":1,"type":"disassoc"}
+//   {"cmd":"deauth_loop_start","target":"AA:BB:CC:DD:EE:FF","interval":200}  (reenvia a cada 200ms ate parar)
+//   {"cmd":"deauth_loop_stop"}                                       (para o loop)
 class CommandHandler {
 public:
   explicit CommandHandler(WifiManager &wifi) : wifi_(wifi) {}
@@ -43,5 +45,7 @@ private:
   String doSniffPoll();
   String doSniffStats();
   String doDeauth(JsonVariantConst req);
+  String doDeauthLoopStart(JsonVariantConst req);
+  String doDeauthLoopStop();
   WifiManager &wifi_;
 };

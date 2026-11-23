@@ -45,10 +45,22 @@ public:
   SniffStats sniffStats() const { return sniffer_.stats(); }
   PmfInfo sniffPmf() const { return sniffer_.pmf(); }
 
-  // Deauth: target = "broadcast" ou um MAC "AA:BB:CC:DD:EE:FF".
-  // frameType = "deauth" (padrao) ou "disassoc" (alguns builds de SDK
-  // bloqueiam um e deixam passar o outro -- ver diagrams/99_ideias_futuras.md).
-  bool sendDeauth(const String &target, uint16_t reason, const String &frameType = "deauth");
+  // Deauth one-shot: manda `count` frames (poucos). target = "broadcast" ou um
+  // MAC "AA:BB:CC:DD:EE:FF". frameType = "deauth" (padrao) ou "disassoc".
+  bool sendDeauth(const String &target, uint16_t reason, const String &frameType = "deauth",
+                  uint16_t count = 1);
+
+  // Loop de deauth: reenvia poucos frames a cada intervalo pra manter o alvo
+  // fora da rede (um deauth solto o cliente reconecta na hora). Roda "por cima"
+  // do estado LOCKED; precisa chamar tick() no loop() principal.
+  bool startDeauthLoop(const String &target, uint16_t reason,
+                       const String &frameType = "deauth", uint32_t intervalMs = 200);
+  void stopDeauthLoop();
+  bool deauthLoopActive() const { return deauthLoopActive_; }
+  uint32_t deauthLoopSent() const { return loopSentTotal_; }
+  uint32_t deauthLoopInterval() const { return loopIntervalMs_; }
+  String deauthLoopTargetString() const;
+  void tick();  // reenvio periodico do loop; chamar sempre no loop() principal
 
   WifiState state() const { return state_; }
   String stateName() const;
@@ -60,4 +72,13 @@ private:
   String lockedSsid_;
   int lockedChannel_ = 0;
   PacketSniffer sniffer_;
+
+  // Loop de deauth (reenvio periodico por cima do estado LOCKED)
+  bool deauthLoopActive_ = false;
+  uint8_t loopTarget_[6] = {0};
+  uint16_t loopReason_ = 1;
+  uint8_t loopFc0_ = 0;
+  uint32_t loopIntervalMs_ = 200;
+  uint32_t lastLoopSend_ = 0;
+  uint32_t loopSentTotal_ = 0;
 };

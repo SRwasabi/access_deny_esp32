@@ -25,5 +25,6 @@ void loop() {
       t->send(handler.handle(line));
     }
   }
+  wifi.tick();  // reenvio periodico do loop de deauth, se estiver ativo
   delay(10);
 }
